@@ -8,18 +8,20 @@ import "net/http"
 
 type Coordinator struct {
 	// Your definitions here.
-
+	files      []string
+	fileNum    int            // file數量
+	fileToTask map[string]int // 文件和任務序號對應關係
+	taskState  map[int]int    // 任務狀態，等待執行、進行中、結束
 }
 
 // Your code here -- RPC handlers for the worker to call.
-
-//
 // an example RPC handler.
-//
 // the RPC argument and reply types are defined in rpc.go.
-//
-func (c *Coordinator) Example(args *ExampleArgs, reply *ExampleReply) error {
-	reply.Y = args.X + 1
+func (c *Coordinator) coordinateTask(args *TaskArgs, reply *Task) error {
+	return nil
+}
+
+func (c *Coordinator) getResult(args *Task, reply *Task) error {
 	return nil
 }
 
