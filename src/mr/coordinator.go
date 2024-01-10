@@ -1,6 +1,11 @@
 package mr
 
-import "log"
+import (
+	"fmt"
+	"log"
+	"strconv"
+	"sync"
+)
 import "net"
 import "os"
 import "net/rpc"
@@ -8,16 +13,27 @@ import "net/http"
 
 type Coordinator struct {
 	// Your definitions here.
-	files      []string
-	fileNum    int            // file數量
-	fileToTask map[string]int // 文件和任務序號對應關係
-	taskState  map[int]int    // 任務狀態，等待執行、進行中、結束
+	m             sync.Mutex
+	fileNum       int            // file數量
+	fileToMapTask map[string]int // 文件和任務序號對應關係
+	mapTaskChan   chan string
+	taskState     map[int]int // 任務狀態，等待執行、進行中、結束
+	nReduce       int         // 所有的reduce任务
+	reduceTasks   chan string
+	phase         int
 }
 
-// Your code here -- RPC handlers for the worker to call.
-// an example RPC handler.
-// the RPC argument and reply types are defined in rpc.go.
+// 分配任务
 func (c *Coordinator) coordinateTask(args *TaskArgs, reply *Task) error {
+	if c.phase == mapping {
+		file := <-c.mapTaskChan
+		reply.fileName = file
+		reply.taskId = c.fileToMapTask[file]
+		fmt.Println("sending task " + strconv.Itoa(reply.taskId) + "file name is " + file)
+		return nil
+	} else if c.phase == reducing {
+		return nil
+	}
 	return nil
 }
 
@@ -25,9 +41,7 @@ func (c *Coordinator) getResult(args *Task, reply *Task) error {
 	return nil
 }
 
-//
 // start a thread that listens for RPCs from worker.go
-//
 func (c *Coordinator) server() {
 	rpc.Register(c)
 	rpc.HandleHTTP()
@@ -41,10 +55,8 @@ func (c *Coordinator) server() {
 	go http.Serve(l, nil)
 }
 
-//
 // main/mrcoordinator.go calls Done() periodically to find out
 // if the entire job has finished.
-//
 func (c *Coordinator) Done() bool {
 	ret := false
 
@@ -53,11 +65,9 @@ func (c *Coordinator) Done() bool {
 	return ret
 }
 
-//
 // create a Coordinator.
 // main/mrcoordinator.go calls this function.
 // nReduce is the number of reduce tasks to use.
-//
 func MakeCoordinator(files []string, nReduce int) *Coordinator {
 	c := Coordinator{}
 
@@ -65,4 +75,13 @@ func MakeCoordinator(files []string, nReduce int) *Coordinator {
 
 	c.server()
 	return &c
+}
+
+func (c *Coordinator) generateMapTasks(files []string) {
+	c.phase = mapping
+	for n, f := range files {
+		c.fileToMapTask[f] = n
+		c.taskState[n] = waiting
+		c.mapTaskChan <- f
+	}
 }

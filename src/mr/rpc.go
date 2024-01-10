@@ -30,10 +30,16 @@ const (
 	finished
 )
 
+const (
+	mapping = iota
+	reducing
+	done
+)
+
 type Task struct {
 	workerType int
 	fileName   string
-	taskId     int
+	taskId     int // map number or reduce number
 	taskState  int
 }
 

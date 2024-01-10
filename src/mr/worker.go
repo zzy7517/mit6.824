@@ -2,24 +2,16 @@ package mr
 
 import (
 	"fmt"
+	"hash/fnv"
 	"io/ioutil"
+	"log"
+	"net/rpc"
 	"os"
-	"sort"
+	"strconv"
 )
-import "log"
-import "net/rpc"
-import "hash/fnv"
 
 // worker执行map任务，生成immediate文件
 // 然后执行reduce任务
-
-// for sorting by key.
-type ByKey []KeyValue
-
-// for sorting by key.
-func (a ByKey) Len() int           { return len(a) }
-func (a ByKey) Swap(i, j int)      { a[i], a[j] = a[j], a[i] }
-func (a ByKey) Less(i, j int) bool { return a[i].Key < a[j].Key }
 
 // Map functions return a slice of KeyValue.
 type KeyValue struct {
@@ -59,6 +51,7 @@ func doTask(task Task, mapf func(string, string) []KeyValue,
 	workerType := task.workerType
 	switch workerType {
 	case workerMap:
+		// 使用select控制worker超时
 		doMapTask(task, mapf)
 	case workerReduce:
 		doReduceTask(task, reducef)
@@ -77,17 +70,28 @@ func doMapTask(task Task, mapf func(string, string) []KeyValue) {
 		log.Fatalf("cannot read %v", filename)
 	}
 	file.Close()
-	inter := mapf(filename, string(content))
+	inters := mapf(filename, string(content))
 
-	sort.Sort(ByKey(inter))
-	oname := "mr-inter-" + string(task.taskId)
-	ofile, _ := os.Create(oname)
+	keyValueSplit := make(map[int][]KeyValue)
 
-	i := 0
-	for i < len(inter) {
-		fmt.Fprintf(ofile, "%v %v\n", inter[i].Key, inter[i].Value)
+	// split map task
+	// naming convention for intermediate files is mr-X-Y
+	// where X is the Map task number, and Y is the reduce task number.
+	for _, inter := range inters {
+		hashKey := ihash(inter.Key)
+		keyValueSplit[hashKey] = append(keyValueSplit[hashKey], inter)
 	}
-	ofile.Close()
+
+	for k, v := range keyValueSplit {
+		oname := "mr-" + strconv.Itoa(task.taskId) + "-" + strconv.Itoa(k)
+		ofile, _ := os.Create(oname)
+		i := 0
+		for i < len(v) {
+			fmt.Fprintf(ofile, "%v %v\n", v[i].Key, v[i].Value)
+		}
+		ofile.Close()
+		fmt.Printf("finish map task %v-%v", task.taskId, k)
+	}
 	sendResult(task)
 }
 
