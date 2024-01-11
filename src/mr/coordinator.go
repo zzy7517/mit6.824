@@ -3,13 +3,13 @@ package mr
 import (
 	"fmt"
 	"log"
+	"net"
+	"net/http"
+	"net/rpc"
+	"os"
 	"strconv"
 	"sync"
 )
-import "net"
-import "os"
-import "net/rpc"
-import "net/http"
 
 type Coordinator struct {
 	// Your definitions here.
@@ -38,7 +38,29 @@ func (c *Coordinator) coordinateTask(args *TaskArgs, reply *Task) error {
 }
 
 func (c *Coordinator) getResult(args *Task, reply *Task) error {
+	if c.phase == mapping {
+		if reply.taskState == done {
+			c.taskState[reply.taskId] = done
+			c.checkMapDone()
+		} else {
+			c.taskState[reply.taskId] = waiting
+			c.mapTaskChan <- reply.fileName
+		}
+	} else if c.phase == reducing {
+
+	} else {
+
+	}
 	return nil
+}
+
+func (c *Coordinator) checkMapDone() {
+	for _, v := range c.taskState {
+		if v == waiting {
+			return
+		}
+	}
+	c.phase = reducing
 }
 
 // start a thread that listens for RPCs from worker.go

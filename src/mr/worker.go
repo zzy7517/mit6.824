@@ -1,6 +1,7 @@
 package mr
 
 import (
+	"context"
 	"fmt"
 	"hash/fnv"
 	"io/ioutil"
@@ -8,10 +9,10 @@ import (
 	"net/rpc"
 	"os"
 	"strconv"
+	"time"
 )
 
-// worker执行map任务，生成immediate文件
-// 然后执行reduce任务
+const timeout = 10 * time.Second
 
 // Map functions return a slice of KeyValue.
 type KeyValue struct {
@@ -32,21 +33,33 @@ func Worker(mapf func(string, string) []KeyValue,
 	reducef func(string, []string) string) {
 	task, ok := getTask()
 	if ok {
-		fmt.Printf("reply is %v\n", task)
-		doTask(task, mapf, reducef)
+		// 10s超时
+		ctx, cancel := context.WithTimeout(context.Background(), timeout)
+		defer cancel()
+		go doTask(task, mapf, reducef)
+		select {
+		case <-ctx.Done():
+			fmt.Println("task finished, file name is %v", task.fileName)
+			sendResult(task, true)
+		case <-time.After(timeout):
+			fmt.Printf("timeout!!!, file name is %v", task.fileName)
+			sendResult(task, false)
+			return
+		}
 	} else {
 		fmt.Println("get task failed")
+		sendResult(task, false)
 	}
 }
 
-func getTask() (Task, bool) {
-	taskArgs := TaskArgs{}
-	reply := Task{}
-	ok := call("Coordinator.coordinateTask", &taskArgs, &reply)
+func getTask() (*Task, bool) {
+	taskArgs := &TaskArgs{}
+	reply := &Task{}
+	ok := call("Coordinator.coordinateTask", &taskArgs, reply)
 	return reply, ok
 }
 
-func doTask(task Task, mapf func(string, string) []KeyValue,
+func doTask(task *Task, mapf func(string, string) []KeyValue,
 	reducef func(string, []string) string) {
 	workerType := task.workerType
 	switch workerType {
@@ -56,10 +69,11 @@ func doTask(task Task, mapf func(string, string) []KeyValue,
 	case workerReduce:
 		doReduceTask(task, reducef)
 	default:
+		return
 	}
 }
 
-func doMapTask(task Task, mapf func(string, string) []KeyValue) {
+func doMapTask(task *Task, mapf func(string, string) []KeyValue) {
 	filename := task.fileName
 	file, err := os.Open(filename)
 	if err != nil {
@@ -92,12 +106,16 @@ func doMapTask(task Task, mapf func(string, string) []KeyValue) {
 		ofile.Close()
 		fmt.Printf("finish map task %v-%v", task.taskId, k)
 	}
-	sendResult(task)
 }
 
-func sendResult(task Task) {
+func sendResult(task *Task, isFinished bool) {
+	if isFinished {
+		task.taskState = done
+	} else {
+		task.taskState = waiting
+	}
 	reply := Task{}
-	ok := call("Coordinator.getResult", &task, &reply)
+	ok := call("Coordinator.getResult", task, &reply)
 	if ok {
 		fmt.Println("send result succeed")
 	} else {
@@ -105,7 +123,7 @@ func sendResult(task Task) {
 	}
 }
 
-func doReduceTask(task Task, reducef func(string, []string) string) {
+func doReduceTask(task *Task, reducef func(string, []string) string) {
 
 }
 
