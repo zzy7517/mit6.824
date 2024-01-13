@@ -17,30 +17,39 @@ import "strconv"
 type TaskArgs struct {
 }
 
+type workerTypeEnum int
+
 const (
-	workerMap = iota
-	workerReduce
+	workerMap    workerTypeEnum = 0
+	workerReduce workerTypeEnum = 1
 	// when there is no task to handle
-	workerNone
+	workerNone workerTypeEnum = 2
 )
 
-const (
-	waiting = iota
-	processing
-	finished
-)
+type TaskStateEnum int
 
 const (
-	mapping = iota
-	reducing
-	done
+	TaskWaiting    TaskStateEnum = 0
+	taskProcessing TaskStateEnum = 1
+	TaskFinished   TaskStateEnum = 2
+)
+
+type PhaseEnum int
+
+const (
+	Mapping  PhaseEnum = 0
+	Reducing PhaseEnum = 1
+	Done     PhaseEnum = 2
 )
 
 type Task struct {
-	workerType int
-	fileName   string
-	taskId     int // map number or reduce number
-	taskState  int
+	workerType    workerTypeEnum
+	MapFileName   string
+	TaskId        int // map number or reduce number
+	TaskState     TaskStateEnum
+	ReduceFileMap map[int][]string
+	InterFiles    []string
+	ReduceResult  []KeyValue
 }
 
 // Add your RPC definitions here.
@@ -49,7 +58,7 @@ type Task struct {
 // in /var/tmp, for the coordinator.
 // Can't use the current directory since
 // Athena AFS doesn't support UNIX-domain sockets.
-func coordinatorSock() string {
+func CoordinatorSock() string {
 	s := "/var/tmp/5840-mr-"
 	s += strconv.Itoa(os.Getuid())
 	return s

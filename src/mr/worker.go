@@ -2,12 +2,14 @@ package mr
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"hash/fnv"
 	"io/ioutil"
 	"log"
 	"net/rpc"
 	"os"
+	"sort"
 	"strconv"
 	"time"
 )
@@ -19,6 +21,13 @@ type KeyValue struct {
 	Key   string
 	Value string
 }
+
+type ByKey []KeyValue
+
+// for sorting by key.
+func (a ByKey) Len() int           { return len(a) }
+func (a ByKey) Swap(i, j int)      { a[i], a[j] = a[j], a[i] }
+func (a ByKey) Less(i, j int) bool { return a[i].Key < a[j].Key }
 
 // use ihash(key) % NReduce to choose the reduce
 // task number for each KeyValue emitted by Map.
@@ -39,10 +48,10 @@ func Worker(mapf func(string, string) []KeyValue,
 		go doTask(task, mapf, reducef)
 		select {
 		case <-ctx.Done():
-			fmt.Println("task finished, file name is %v", task.fileName)
+			fmt.Println("task finished, file name is %v", task.MapFileName)
 			sendResult(task, true)
 		case <-time.After(timeout):
-			fmt.Printf("timeout!!!, file name is %v", task.fileName)
+			fmt.Printf("timeout!!!, file name is %v", task.MapFileName)
 			sendResult(task, false)
 			return
 		}
@@ -74,7 +83,7 @@ func doTask(task *Task, mapf func(string, string) []KeyValue,
 }
 
 func doMapTask(task *Task, mapf func(string, string) []KeyValue) {
-	filename := task.fileName
+	filename := task.MapFileName
 	file, err := os.Open(filename)
 	if err != nil {
 		log.Fatalf("cannot open %v", filename)
@@ -97,22 +106,30 @@ func doMapTask(task *Task, mapf func(string, string) []KeyValue) {
 	}
 
 	for k, v := range keyValueSplit {
-		oname := "mr-" + strconv.Itoa(task.taskId) + "-" + strconv.Itoa(k)
+		oname := "mr-" + strconv.Itoa(task.TaskId) + "-" + strconv.Itoa(k)
 		ofile, _ := os.Create(oname)
-		i := 0
-		for i < len(v) {
-			fmt.Fprintf(ofile, "%v %v\n", v[i].Key, v[i].Value)
+		//i := 0
+		//for i < len(v) {
+		//	fmt.Fprintf(ofile, "%v %v\n", v[i].Key, v[i].Value)
+		//}
+		enc := json.NewEncoder(ofile)
+		for _, kv := range v {
+			err := enc.Encode(&kv)
+			if err != nil {
+				fmt.Printf("encode kv to file %v failed\n", oname)
+			}
 		}
 		ofile.Close()
-		fmt.Printf("finish map task %v-%v", task.taskId, k)
+		fmt.Printf("finish map task %v-%v", task.TaskId, k)
+		task.ReduceFileMap[k] = append(task.ReduceFileMap[k], oname)
 	}
 }
 
 func sendResult(task *Task, isFinished bool) {
 	if isFinished {
-		task.taskState = done
+		task.TaskState = TaskFinished
 	} else {
-		task.taskState = waiting
+		task.TaskState = TaskWaiting
 	}
 	reply := Task{}
 	ok := call("Coordinator.getResult", task, &reply)
@@ -124,7 +141,45 @@ func sendResult(task *Task, isFinished bool) {
 }
 
 func doReduceTask(task *Task, reducef func(string, []string) string) {
+	interFiles := task.InterFiles
+	var intermediate []KeyValue
+	for _, fileName := range interFiles {
+		file, err := os.Open(fileName)
+		if err != nil {
+			log.Fatalf("cannot open %v", task.MapFileName)
+		}
+		dec := json.NewDecoder(file)
+		for {
+			var kv KeyValue
+			if err := dec.Decode(&kv); err != nil {
+				break
+			}
+			intermediate = append(intermediate, kv)
+		}
+	}
+	sort.Sort(ByKey(intermediate))
 
+	var reduceResult []KeyValue
+	i := 0
+	for i < len(intermediate) {
+		j := i + 1
+		for j < len(intermediate) && intermediate[j].Key == intermediate[i].Key {
+			j++
+		}
+		values := []string{}
+		for k := i; k < j; k++ {
+			values = append(values, intermediate[k].Value)
+		}
+		output := reducef(intermediate[i].Key, values)
+
+		// this is the correct format for each line of Reduce output.
+		reduceResult = append(reduceResult, KeyValue{
+			Key:   intermediate[i].Key,
+			Value: output,
+		})
+		i = j
+	}
+	task.ReduceResult = reduceResult
 }
 
 // send an RPC request to the coordinator, wait for the response.
@@ -132,7 +187,7 @@ func doReduceTask(task *Task, reducef func(string, []string) string) {
 // returns false if something goes wrong.
 func call(rpcname string, args interface{}, reply interface{}) bool {
 	// c, err := rpc.DialHTTP("tcp", "127.0.0.1"+":1234")
-	sockname := coordinatorSock()
+	sockname := CoordinatorSock()
 	c, err := rpc.DialHTTP("unix", sockname)
 	if err != nil {
 		log.Fatal("dialing:", err)
