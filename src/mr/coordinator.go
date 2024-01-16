@@ -1,7 +1,6 @@
-package coordinator
+package mr
 
 import (
-	"6.5840/mr"
 	"log"
 	"net"
 	"net/http"
@@ -10,16 +9,30 @@ import (
 )
 
 type Coordinator struct {
-	phase             mr.PhaseEnum // 当前phase: mapping/reducing/done
-	mapCoordinator    MapCoordinator
+	phase             PhaseEnum // 当前phase: mapping/reducing/done
+	mapCoordinator    mapCoordinator
 	reduceCoordinator reduceCoordinator
-	result            []mr.KeyValue
+	result            []KeyValue
 	done              bool
 }
 
+func (c *Coordinator) init() {
+	c.mapCoordinator = mapCoordinator{
+		mapTaskMap:   make(map[int]string),
+		mapTaskChan:  make(chan int),
+		mapTaskState: make(map[int]TaskStateEnum),
+	}
+
+	c.reduceCoordinator = reduceCoordinator{
+		reduceTaskMap:   make(map[int][]string),
+		reduceTaskChan:  make(chan int),
+		reduceTaskState: make(map[int]TaskStateEnum),
+	}
+}
+
 // 分配任务
-func (c *Coordinator) coordinateTask(args *mr.TaskArgs, reply *mr.Task) error {
-	if c.phase == mr.Mapping {
+func (c *Coordinator) coordinateTask(args *TaskArgs, reply *Task) error {
+	if c.phase == Mapping {
 		c.mapCoordinator.coordinateTask(args, reply)
 	} else {
 		c.reduceCoordinator.coordinateTask(args, reply)
@@ -27,24 +40,24 @@ func (c *Coordinator) coordinateTask(args *mr.TaskArgs, reply *mr.Task) error {
 	return nil
 }
 
-func (c *Coordinator) getResult(args *mr.Task, reply *mr.Task) {
-	if c.phase == mr.Mapping {
+func (c *Coordinator) getResult(args *Task, reply *Task) {
+	if c.phase == Mapping {
 		isSucc := c.mapCoordinator.getResult(args, reply)
 		if isSucc {
 			for k, v := range reply.ReduceFileMap {
 				c.reduceCoordinator.reduceTaskMap[k] = append(c.reduceCoordinator.reduceTaskMap[k], v...)
 			}
 			if c.mapCoordinator.checkMapDone() {
-				c.phase = mr.Reducing
+				c.phase = Reducing
 				c.reduceCoordinator.generateReduceTasks()
 			}
 		}
-	} else if c.phase == mr.Reducing {
+	} else if c.phase == Reducing {
 		isSucc := c.reduceCoordinator.getResult(args, reply)
 		if isSucc {
 			c.result = append(c.result, reply.ReduceResult...)
 			if c.reduceCoordinator.checkReduceDone() {
-				c.phase = mr.Done
+				c.phase = Done
 				c.done = true
 			}
 		}
@@ -56,7 +69,7 @@ func (c *Coordinator) server() {
 	rpc.Register(c)
 	rpc.HandleHTTP()
 	//l, e := net.Listen("tcp", ":1234")
-	sockname := mr.CoordinatorSock()
+	sockname := CoordinatorSock()
 	os.Remove(sockname)
 	l, e := net.Listen("unix", sockname)
 	if e != nil {
@@ -76,7 +89,10 @@ func (c *Coordinator) Done() bool {
 // nReduce is the number of reduce tasks to use.
 func MakeCoordinator(files []string, nReduce int) *Coordinator {
 	c := Coordinator{}
-	c.mapCoordinator.generateMapTasks(files)
+	c.init()
+	go func() {
+		c.mapCoordinator.generateMapTasks(files)
+	}()
 	// Your code here.
 
 	c.server()

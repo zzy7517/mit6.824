@@ -1,19 +1,18 @@
-package coordinator
+package mr
 
 import (
-	"6.5840/mr"
 	"fmt"
 	"os"
 	"strconv"
 )
 
-type MapCoordinator struct {
+type mapCoordinator struct {
 	mapTaskMap   map[int]string // map任务编号和文件名对应
 	mapTaskChan  chan int
-	mapTaskState map[int]mr.TaskStateEnum // 任務狀態: waiting/processing/finished
+	mapTaskState map[int]TaskStateEnum // 任務狀態: waiting/processing/finished
 }
 
-func (m *MapCoordinator) coordinateTask(args *mr.TaskArgs, reply *mr.Task) error {
+func (m *mapCoordinator) coordinateTask(args *TaskArgs, reply *Task) error {
 	mapTaskNum := <-m.mapTaskChan
 	reply.MapFileName = m.mapTaskMap[mapTaskNum]
 	reply.TaskId = mapTaskNum
@@ -21,14 +20,14 @@ func (m *MapCoordinator) coordinateTask(args *mr.TaskArgs, reply *mr.Task) error
 	return nil
 }
 
-func (m *MapCoordinator) getResult(args *mr.Task, reply *mr.Task) bool {
-	if reply.TaskState == mr.TaskFinished {
+func (m *mapCoordinator) getResult(args *Task, reply *Task) bool {
+	if reply.TaskState == TaskFinished {
 		// map执行完成后，
-		m.mapTaskState[reply.TaskId] = mr.TaskFinished
+		m.mapTaskState[reply.TaskId] = TaskFinished
 		return true
 	} else {
 		// map执行超时，重置这个file的状态，并且删除这个map执行过程中生成的中间文件
-		m.mapTaskState[reply.TaskId] = mr.TaskWaiting
+		m.mapTaskState[reply.TaskId] = TaskWaiting
 		for _, files := range reply.ReduceFileMap {
 			for _, file := range files {
 				err := os.Remove(file)
@@ -43,19 +42,19 @@ func (m *MapCoordinator) getResult(args *mr.Task, reply *mr.Task) bool {
 	}
 }
 
-func (m *MapCoordinator) checkMapDone() bool {
+func (m *mapCoordinator) checkMapDone() bool {
 	for _, v := range m.mapTaskState {
-		if v == mr.TaskWaiting {
+		if v == TaskWaiting {
 			return false
 		}
 	}
 	return true
 }
 
-func (m *MapCoordinator) generateMapTasks(files []string) {
+func (m *mapCoordinator) generateMapTasks(files []string) {
 	for n, f := range files {
 		m.mapTaskMap[n] = f
-		m.mapTaskState[n] = mr.TaskWaiting
+		m.mapTaskState[n] = TaskWaiting
 		m.mapTaskChan <- n
 	}
 }

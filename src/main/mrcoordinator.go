@@ -10,7 +10,7 @@ package main
 //
 
 import (
-	"6.5840/mr/coordinator"
+	"6.5840/mr"
 )
 import "time"
 import "os"
@@ -22,7 +22,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	m := coordinator.MakeCoordinator(os.Args[1:], 10)
+	m := mr.MakeCoordinator(os.Args[1:], 10)
 	for m.Done() == false {
 		time.Sleep(time.Second)
 	}
