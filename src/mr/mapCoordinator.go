@@ -10,12 +10,15 @@ type mapCoordinator struct {
 	mapTaskMap   map[int]string // map任务编号和文件名对应
 	mapTaskChan  chan int
 	mapTaskState map[int]TaskStateEnum // 任務狀態: waiting/processing/finished
+	nReduce      int
 }
 
 func (m *mapCoordinator) coordinateTask(args *TaskArgs, reply *Task) error {
 	mapTaskNum := <-m.mapTaskChan
 	reply.MapFileName = m.mapTaskMap[mapTaskNum]
 	reply.TaskId = mapTaskNum
+	reply.nReduce = m.nReduce
+	fmt.Printf("sending task is %v \n", reply)
 	fmt.Println("sending map task " + strconv.Itoa(reply.TaskId) + "file name is " + reply.MapFileName)
 	return nil
 }

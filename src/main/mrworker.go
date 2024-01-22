@@ -30,10 +30,10 @@ func main() {
 // load the application Map and Reduce functions
 // from a plugin file, e.g. ../mrapps/wc.so
 func loadPlugin(filename string) (func(string, string) []mr.KeyValue, func(string, []string) string) {
-	currentPath, err := os.Getwd()
-	p, err := plugin.Open(currentPath + "/main/" + filename)
+	// currentPath, err := os.Getwd()
+	p, err := plugin.Open(filename)
 	if err != nil {
-		log.Fatalf("cannot load plugin %v", filename)
+		log.Fatalf("cannot load plugin1 %v", filename)
 	}
 	xmapf, err := p.Lookup("Map")
 	if err != nil {

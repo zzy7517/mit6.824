@@ -41,6 +41,7 @@ func ihash(key string) int {
 func Worker(mapf func(string, string) []KeyValue,
 	reducef func(string, []string) string) {
 	task, ok := getTask()
+	fmt.Println("n reduce is " + strconv.Itoa(task.nReduce))
 	if ok {
 		// 10s超时
 		ctx, cancel := context.WithTimeout(context.Background(), timeout)
@@ -64,7 +65,8 @@ func Worker(mapf func(string, string) []KeyValue,
 func getTask() (*Task, bool) {
 	taskArgs := &TaskArgs{}
 	reply := &Task{}
-	ok := call("Coordinator.coordinateTask", &taskArgs, reply)
+	ok := call("Coordinator.CoordinateTask", &taskArgs, reply)
+	fmt.Printf("reply is %v \n", reply)
 	return reply, ok
 }
 
@@ -101,7 +103,7 @@ func doMapTask(task *Task, mapf func(string, string) []KeyValue) {
 	// naming convention for intermediate files is mr-X-Y
 	// where X is the Map task number, and Y is the reduce task number.
 	for _, inter := range inters {
-		hashKey := ihash(inter.Key)
+		hashKey := ihash(inter.Key) % task.nReduce
 		keyValueSplit[hashKey] = append(keyValueSplit[hashKey], inter)
 	}
 
@@ -121,6 +123,7 @@ func doMapTask(task *Task, mapf func(string, string) []KeyValue) {
 		}
 		ofile.Close()
 		fmt.Printf("finish map task %v-%v", task.TaskId, k)
+		task.ReduceFileMap = make(map[int][]string)
 		task.ReduceFileMap[k] = append(task.ReduceFileMap[k], oname)
 	}
 }
@@ -132,11 +135,11 @@ func sendResult(task *Task, isFinished bool) {
 		task.TaskState = TaskWaiting
 	}
 	reply := Task{}
-	ok := call("Coordinator.getResult", task, &reply)
+	ok := call("Coordinator.GetResult", task, &reply)
 	if ok {
 		fmt.Println("send result succeed")
 	} else {
-		fmt.Println("send resutl to coordinator failed")
+		fmt.Println("send result to coordinator failed")
 	}
 }
 

@@ -48,6 +48,7 @@ type Task struct {
 	TaskId        int // map number or reduce number
 	TaskState     TaskStateEnum
 	ReduceFileMap map[int][]string
+	nReduce       int
 	InterFiles    []string
 	ReduceResult  []KeyValue
 }

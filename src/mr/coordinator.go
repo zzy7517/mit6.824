@@ -1,6 +1,7 @@
 package mr
 
 import (
+	"fmt"
 	"log"
 	"net"
 	"net/http"
@@ -16,31 +17,41 @@ type Coordinator struct {
 	done              bool
 }
 
-func (c *Coordinator) init() {
+func (c *Coordinator) init(nReduce int) {
 	c.mapCoordinator = mapCoordinator{
 		mapTaskMap:   make(map[int]string),
 		mapTaskChan:  make(chan int),
 		mapTaskState: make(map[int]TaskStateEnum),
+		nReduce:      nReduce,
 	}
 
 	c.reduceCoordinator = reduceCoordinator{
 		reduceTaskMap:   make(map[int][]string),
 		reduceTaskChan:  make(chan int),
 		reduceTaskState: make(map[int]TaskStateEnum),
+		nReduce:         nReduce,
 	}
 }
 
 // 分配任务
-func (c *Coordinator) coordinateTask(args *TaskArgs, reply *Task) error {
+func (c *Coordinator) CoordinateTask(args *TaskArgs, reply *Task) error {
 	if c.phase == Mapping {
-		c.mapCoordinator.coordinateTask(args, reply)
+		err := c.mapCoordinator.coordinateTask(args, reply)
+		if err != nil {
+			fmt.Println("map coordinate task err: ", err)
+			return err
+		}
 	} else {
-		c.reduceCoordinator.coordinateTask(args, reply)
+		err := c.reduceCoordinator.coordinateTask(args, reply)
+		if err != nil {
+			fmt.Println("reduce coordinate task err: ", err)
+			return err
+		}
 	}
 	return nil
 }
 
-func (c *Coordinator) getResult(args *Task, reply *Task) {
+func (c *Coordinator) GetResult(args *Task, reply *Task) {
 	if c.phase == Mapping {
 		isSucc := c.mapCoordinator.getResult(args, reply)
 		if isSucc {
@@ -89,7 +100,7 @@ func (c *Coordinator) Done() bool {
 // nReduce is the number of reduce tasks to use.
 func MakeCoordinator(files []string, nReduce int) *Coordinator {
 	c := Coordinator{}
-	c.init()
+	c.init(nReduce)
 	go func() {
 		c.mapCoordinator.generateMapTasks(files)
 	}()
