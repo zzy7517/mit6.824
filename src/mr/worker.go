@@ -49,7 +49,7 @@ func Worker(mapf func(string, string) []KeyValue,
 		go doTask(task, mapf, reducef)
 		select {
 		case <-ctx.Done():
-			fmt.Println("task finished, file name is %v", task.MapFileName)
+			fmt.Printf("task finished, file name is %v", task.MapFileName)
 			sendResult(task, true)
 		case <-time.After(timeout):
 			fmt.Printf("timeout!!!, file name is %v", task.MapFileName)
@@ -64,10 +64,10 @@ func Worker(mapf func(string, string) []KeyValue,
 
 func getTask() (*Task, bool) {
 	taskArgs := &TaskArgs{}
-	reply := &Task{}
-	ok := call("Coordinator.CoordinateTask", &taskArgs, reply)
-	fmt.Printf("reply is %v \n", reply)
-	return reply, ok
+	reply := Task{}
+	ok := call("Coordinator.CoordinateTask", &taskArgs, &reply)
+	fmt.Printf("reply is %+v \n", reply)
+	return &reply, ok
 }
 
 func doTask(task *Task, mapf func(string, string) []KeyValue,

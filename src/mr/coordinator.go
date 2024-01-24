@@ -7,71 +7,130 @@ import (
 	"net/http"
 	"net/rpc"
 	"os"
+	"strconv"
 )
 
 type Coordinator struct {
-	phase             PhaseEnum // 当前phase: mapping/reducing/done
-	mapCoordinator    mapCoordinator
-	reduceCoordinator reduceCoordinator
-	result            []KeyValue
-	done              bool
-}
+	phase   PhaseEnum // 当前phase: mapping/reducing/done
+	result  []KeyValue
+	done    bool
+	nReduce int
 
-func (c *Coordinator) init(nReduce int) {
-	c.mapCoordinator = mapCoordinator{
-		mapTaskMap:   make(map[int]string),
-		mapTaskChan:  make(chan int),
-		mapTaskState: make(map[int]TaskStateEnum),
-		nReduce:      nReduce,
-	}
+	mapTaskMap   map[int]string // map任务编号和文件名对应
+	mapTaskChan  chan int
+	mapTaskState map[int]TaskStateEnum // 任務狀態: waiting/processing/finished
 
-	c.reduceCoordinator = reduceCoordinator{
-		reduceTaskMap:   make(map[int][]string),
-		reduceTaskChan:  make(chan int),
-		reduceTaskState: make(map[int]TaskStateEnum),
-		nReduce:         nReduce,
-	}
+	reduceTaskMap   map[int][]string // reduce number下对应的所有interfile
+	reduceTaskChan  chan int
+	reduceTaskState map[int]TaskStateEnum
 }
 
 // 分配任务
 func (c *Coordinator) CoordinateTask(args *TaskArgs, reply *Task) error {
 	if c.phase == Mapping {
-		err := c.mapCoordinator.coordinateTask(args, reply)
-		if err != nil {
-			fmt.Println("map coordinate task err: ", err)
-			return err
-		}
+		mapTaskNum := <-c.mapTaskChan
+		reply.MapFileName = c.mapTaskMap[mapTaskNum]
+		reply.TaskId = mapTaskNum
+		reply.nReduce = c.nReduce
+		fmt.Printf("sending task is %+v \n", reply)
+		fmt.Println("sending map task " + strconv.Itoa(reply.TaskId) + " file name is " + reply.MapFileName)
+		return nil
 	} else {
-		err := c.reduceCoordinator.coordinateTask(args, reply)
-		if err != nil {
-			fmt.Println("reduce coordinate task err: ", err)
-			return err
-		}
+		taskId := <-c.reduceTaskChan
+		interFiles := c.reduceTaskMap[taskId]
+		reply.InterFiles = interFiles
+		reply.TaskId = taskId
+		fmt.Println("sending reduce task " + strconv.Itoa(reply.TaskId) + "reduce number is " + strconv.Itoa(taskId))
+		return nil
 	}
-	return nil
 }
 
 func (c *Coordinator) GetResult(args *Task, reply *Task) {
 	if c.phase == Mapping {
-		isSucc := c.mapCoordinator.getResult(args, reply)
+		isSucc := c.getMapResult(args, reply)
 		if isSucc {
 			for k, v := range reply.ReduceFileMap {
-				c.reduceCoordinator.reduceTaskMap[k] = append(c.reduceCoordinator.reduceTaskMap[k], v...)
+				c.reduceTaskMap[k] = append(c.reduceTaskMap[k], v...)
 			}
-			if c.mapCoordinator.checkMapDone() {
+			if c.checkMapDone() {
 				c.phase = Reducing
-				c.reduceCoordinator.generateReduceTasks()
+				c.generateReduceTasks()
 			}
 		}
 	} else if c.phase == Reducing {
-		isSucc := c.reduceCoordinator.getResult(args, reply)
+		isSucc := c.getReduceResult(args, reply)
 		if isSucc {
 			c.result = append(c.result, reply.ReduceResult...)
-			if c.reduceCoordinator.checkReduceDone() {
+			if c.checkReduceDone() {
 				c.phase = Done
 				c.done = true
 			}
 		}
+	}
+}
+
+func (c *Coordinator) checkMapDone() bool {
+	for _, v := range c.mapTaskState {
+		if v == TaskWaiting {
+			return false
+		}
+	}
+	return true
+}
+
+func (c *Coordinator) getMapResult(args *Task, reply *Task) bool {
+	if reply.TaskState == TaskFinished {
+		// map执行完成后，
+		c.mapTaskState[reply.TaskId] = TaskFinished
+		return true
+	} else {
+		// map执行超时，重置这个file的状态，并且删除这个map执行过程中生成的中间文件
+		c.mapTaskState[reply.TaskId] = TaskWaiting
+		for _, files := range reply.ReduceFileMap {
+			for _, file := range files {
+				err := os.Remove(file)
+				if err != nil {
+					fmt.Printf("remove file failed, err is %v \n", err)
+				}
+			}
+		}
+		// map执行超时，重新放入channel
+		c.mapTaskChan <- reply.TaskId
+		return false
+	}
+}
+
+func (c *Coordinator) getReduceResult(args *Task, reply *Task) bool {
+	if reply.TaskState == TaskFinished {
+		c.reduceTaskState[reply.TaskId] = TaskFinished
+		return true
+	} else {
+		c.reduceTaskChan <- reply.TaskId
+		return false
+	}
+}
+
+func (c *Coordinator) checkReduceDone() bool {
+	for _, v := range c.reduceTaskState {
+		if v == TaskWaiting {
+			return false
+		}
+	}
+	return true
+}
+
+func (c *Coordinator) generateMapTasks(files []string) {
+	for n, f := range files {
+		c.mapTaskMap[n] = f
+		c.mapTaskState[n] = TaskWaiting
+		c.mapTaskChan <- n
+	}
+}
+
+func (c *Coordinator) generateReduceTasks() {
+	for k, _ := range c.reduceTaskMap {
+		c.reduceTaskState[k] = TaskWaiting
+		c.reduceTaskChan <- k
 	}
 }
 
@@ -99,10 +158,18 @@ func (c *Coordinator) Done() bool {
 // main/mrcoordinator.go calls this function.
 // nReduce is the number of reduce tasks to use.
 func MakeCoordinator(files []string, nReduce int) *Coordinator {
-	c := Coordinator{}
-	c.init(nReduce)
+	c := Coordinator{
+		nReduce:         nReduce,
+		mapTaskMap:      make(map[int]string),
+		mapTaskChan:     make(chan int),
+		mapTaskState:    make(map[int]TaskStateEnum),
+		reduceTaskMap:   make(map[int][]string),
+		reduceTaskChan:  make(chan int),
+		reduceTaskState: make(map[int]TaskStateEnum),
+	}
+	fmt.Printf("init coordinator finished, %v \n", c)
 	go func() {
-		c.mapCoordinator.generateMapTasks(files)
+		c.generateMapTasks(files)
 	}()
 	// Your code here.
 
