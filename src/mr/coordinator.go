@@ -31,7 +31,7 @@ func (c *Coordinator) CoordinateTask(args *TaskArgs, reply *Task) error {
 		mapTaskNum := <-c.mapTaskChan
 		reply.MapFileName = c.mapTaskMap[mapTaskNum]
 		reply.TaskId = mapTaskNum
-		reply.nReduce = c.nReduce
+		reply.NReduce = c.nReduce
 		fmt.Printf("sending task is %+v \n", reply)
 		fmt.Println("sending map task " + strconv.Itoa(reply.TaskId) + " file name is " + reply.MapFileName)
 		return nil
@@ -136,7 +136,10 @@ func (c *Coordinator) generateReduceTasks() {
 
 // start a thread that listens for RPCs from worker.go
 func (c *Coordinator) server() {
-	rpc.Register(c)
+	err := rpc.Register(c)
+	if err != nil {
+		fmt.Printf("register err: %v \n", err)
+	}
 	rpc.HandleHTTP()
 	//l, e := net.Listen("tcp", ":1234")
 	sockname := CoordinatorSock()

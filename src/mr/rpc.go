@@ -43,13 +43,12 @@ const (
 )
 
 type Task struct {
-	workerType    workerTypeEnum
+	WorkerType    workerTypeEnum
 	MapFileName   string
 	TaskId        int // map number or reduce number
-	taskid2       int
 	TaskState     TaskStateEnum
 	ReduceFileMap map[int][]string
-	nReduce       int
+	NReduce       int
 	InterFiles    []string
 	ReduceResult  []KeyValue
 }
